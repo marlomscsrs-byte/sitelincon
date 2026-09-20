@@ -34,23 +34,42 @@ async function init(){
  for(const a of ['Hospital','Eventos','Peds','Creators','Mecânicas','Restaurantes','Polícia','Ilegal','Denúncias','Jornal','Judiciário','Screen Share','Administrativa','Desenvolvimento'])await db('INSERT INTO areas(name) VALUES($1) ON CONFLICT(name) DO NOTHING',[a]);
  for(const t of ['Solicitação','Sugestão','Correção'])await db('INSERT INTO request_types(name) VALUES($1) ON CONFLICT(name) DO NOTHING',[t]);
  for(const [name,level] of [['Founder',100],['Director',90],['Coordenador',80],['Supervisor',70],['Administrador',60],['Moderador',40],['Suporte',20]])await db('INSERT INTO hierarchy_roles(name,level) VALUES($1,$2) ON CONFLICT(name) DO NOTHING',[name,level]);
- if(process.env.ADMIN_EMAIL&&process.env.ADMIN_PASSWORD){
+ if(process.env.ADMIN_PASSWORD){
    const hash=await bcrypt.hash(process.env.ADMIN_PASSWORD,12);
-   const adminUsername=String(process.env.ADMIN_USERNAME||'admin').trim().toLowerCase().replace(/[^a-z0-9._-]/g,'')||'admin';
-   const byUsername=await db('SELECT id FROM users WHERE username=$1',[adminUsername]);
-   if(byUsername.rows[0]) {
-     await db('UPDATE users SET is_admin=true,password_hash=$1 WHERE id=$2',[hash,byUsername.rows[0].id]);
-   } else {
-     const byEmail=await db('SELECT id,username,is_admin FROM users WHERE email=$1',[process.env.ADMIN_EMAIL.toLowerCase()]);
-     if(byEmail.rows[0] && !byEmail.rows[0].is_admin) {
-       console.error('ADMIN_EMAIL já pertence a um usuário comum. Use um e-mail diferente para a conta administrativa.');
-     } else if(!byEmail.rows[0]) {
-       await db('INSERT INTO users(name,username,email,password_hash,is_admin) VALUES($1,$2,$3,$4,true)', ['Administrador',adminUsername,process.env.ADMIN_EMAIL.toLowerCase(),hash]);
-     }
+   const adminUsername=(String(process.env.ADMIN_USERNAME||'admin').trim().toLowerCase().replace(/[^a-z0-9._-]/g,'')||'admin');
+   const adminEmail=String(process.env.ADMIN_EMAIL||'').trim().toLowerCase()||null;
+
+   // A conta administrativa é identificada EXCLUSIVAMENTE pelo username configurado.
+   // Primeiro retiramos a permissão administrativa de qualquer conta antiga/stale.
+   await db('UPDATE users SET is_admin=false WHERE LOWER(username)<>LOWER($1) AND is_admin=true',[adminUsername]);
+
+   let target=await db('SELECT id,name,email,username,is_admin FROM users WHERE LOWER(username)=LOWER($1)',[adminUsername]);
+
+   // Se uma versão antiga transformou uma conta comum (ex.: Razor) em "admin",
+   // restaura o username original antes de criar/usar a conta administrativa real.
+   if(target.rows[0] && adminEmail && String(target.rows[0].email||'').toLowerCase()!==adminEmail){
+     const old=target.rows[0];
+     let base=String((old.email||old.name||`usuario${old.id}`).split('@')[0]).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9._-]+/g,'').replace(/^[._-]+|[._-]+$/g,'')||`usuario${old.id}`;
+     let restored=base,n=2;
+     while((await db('SELECT 1 FROM users WHERE LOWER(username)=LOWER($1)',[restored])).rowCount) restored=`${base}${n++}`;
+     await db('UPDATE users SET username=$1,is_admin=false WHERE id=$2',[restored,old.id]);
+     target={rows:[]};
    }
+
+   if(target.rows[0]){
+     await db("UPDATE users SET is_admin=true,password_hash=$1,name=CASE WHEN COALESCE(TRIM(name),'')='' THEN $2 ELSE name END WHERE id=$3",[hash,'Administrador',target.rows[0].id]);
+   }else{
+     if(!adminEmail) throw new Error('ADMIN_EMAIL é necessário para criar a conta administrativa pela primeira vez.');
+     const emailOwner=await db('SELECT id,username FROM users WHERE LOWER(email)=LOWER($1)',[adminEmail]);
+     if(emailOwner.rows[0]) throw new Error(`ADMIN_EMAIL já pertence ao usuário "${emailOwner.rows[0].username}". Use outro e-mail para a conta administrativa.`);
+     await db('INSERT INTO users(name,username,email,password_hash,is_admin) VALUES($1,$2,$3,$4,true)', ['Administrador',adminUsername,adminEmail,hash]);
+   }
+
+   // Garantia final: somente o username administrativo configurado permanece como admin.
+   await db('UPDATE users SET is_admin=(LOWER(username)=LOWER($1))',[adminUsername]);
  }
 }
-function tokenFor(u){return jwt.sign({id:u.id,is_admin:!!u.is_admin},JWT_SECRET,{expiresIn:'7d'})}function auth(req,res,next){try{const h=req.headers.authorization||'';if(!h.startsWith('Bearer '))return res.status(401).json({error:'Não autenticado'});req.user=jwt.verify(h.slice(7),JWT_SECRET);next()}catch{return res.status(401).json({error:'Sessão expirada'})}}function admin(req,res,next){return auth(req,res,()=>req.user.is_admin?next():res.status(403).json({error:'Acesso negado'}))}
+function tokenFor(u){return jwt.sign({id:u.id},JWT_SECRET,{expiresIn:'7d'})}async function auth(req,res,next){try{const h=req.headers.authorization||'';if(!h.startsWith('Bearer '))return res.status(401).json({error:'Não autenticado'});req.user=jwt.verify(h.slice(7),JWT_SECRET);const r=await db('SELECT id,is_admin,active FROM users WHERE id=$1',[req.user.id]);if(!r.rows[0]||r.rows[0].active===false)return res.status(401).json({error:'Sessão inválida'});req.user.is_admin=!!r.rows[0].is_admin;next()}catch{return res.status(401).json({error:'Sessão expirada'})}}function admin(req,res,next){return auth(req,res,()=>req.user.is_admin?next():res.status(403).json({error:'Acesso negado'}))}
 app.get('/api/health',(req,res)=>res.json({ok:true,database:!!pool}));
 app.get('/api/auth/me',auth,async(req,res)=>{const r=await db('SELECT id,name,username,email,is_admin FROM users WHERE id=$1',[req.user.id]);res.json({user:r.rows[0]||null})});
 app.post('/api/auth/register',async(req,res)=>{try{
@@ -67,7 +86,7 @@ app.get('/api/options',async(req,res)=>{try{const[a,t]=await Promise.all([db('SE
 function protocol(id){return `SOL-${String(id).padStart(6,'0')}`}
 app.post('/api/requests',auth,async(req,res)=>{try{const{title,description,type_id,area_id,priority,desired_date}=req.body;if(!title||!description||!priority)return res.status(400).json({error:'Preencha os campos obrigatórios.'});const temporaryProtocol=`TMP-${Date.now()}-${req.user.id}-${Math.random().toString(36).slice(2,8)}`;const r=await db('INSERT INTO requests(protocol,user_id,title,description,type_id,area_id,priority,status,desired_date) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *',[temporaryProtocol,req.user.id,title,description,type_id||null,area_id||null,priority,'Em análise',desired_date||null]);const p=protocol(r.rows[0].id);await db('UPDATE requests SET protocol=$1 WHERE id=$2',[p,r.rows[0].id]);await db('INSERT INTO request_history(request_id,action,details) VALUES($1,$2,$3)',[r.rows[0].id,'Criação','Solicitação registrada']);res.json({request:{...r.rows[0],protocol:p}})}catch(e){console.error('POST /api/requests:',e);res.status(503).json({error:'Não foi possível registrar a solicitação.'})}});
 app.get('/api/requests/mine',auth,async(req,res)=>{try{const r=await db(`SELECT r.*,a.name area,t.name type FROM requests r LEFT JOIN areas a ON a.id=r.area_id LEFT JOIN request_types t ON t.id=r.type_id WHERE r.user_id=$1 ORDER BY r.created_at DESC`,[req.user.id]);res.json({requests:r.rows})}catch{res.status(503).json({error:'Banco de dados indisponível.'})}});
-app.get('/api/requests/:protocol',auth,async(req,res)=>{try{const r=await db(`SELECT r.protocol,r.title,r.description,r.priority,r.status,r.desired_date,r.created_at,r.updated_at,a.name area,t.name type FROM requests r LEFT JOIN areas a ON a.id=r.area_id LEFT JOIN request_types t ON t.id=r.type_id WHERE r.protocol=$1 AND r.user_id=$2`,[req.params.protocol,req.user.id]);if(!r.rows[0])return res.status(404).json({error:'Solicitação não encontrada.'});const h=await db('SELECT action,details,created_at FROM request_history WHERE request_id=(SELECT id FROM requests WHERE protocol=$1 AND user_id=$2) ORDER BY created_at',[req.params.protocol,req.user.id]);res.json({request:r.rows[0],history:h.rows})}catch(e){console.error('GET /api/requests/:protocol:',e);res.status(503).json({error:'Banco de dados indisponível.'})}});
+app.get('/api/requests/:protocol',async(req,res)=>{try{const r=await db(`SELECT r.protocol,r.title,r.description,r.priority,r.status,r.desired_date,r.created_at,r.updated_at,a.name area,t.name type FROM requests r LEFT JOIN areas a ON a.id=r.area_id LEFT JOIN request_types t ON t.id=r.type_id WHERE r.protocol=$1`,[req.params.protocol]);if(!r.rows[0])return res.status(404).json({error:'Protocolo não encontrado.'});const h=await db('SELECT action,details,created_at FROM request_history WHERE request_id=(SELECT id FROM requests WHERE protocol=$1) ORDER BY created_at',[req.params.protocol]);res.json({request:r.rows[0],history:h.rows})}catch{res.status(503).json({error:'Banco de dados indisponível.'})}});
 app.get('/api/admin/users',admin,async(req,res)=>{try{const r=await db(`SELECT u.id,u.name,u.username,u.email,u.staff_id,u.rp_id,u.role_name,u.active,u.warnings,u.last_promotion,a.name area FROM users u LEFT JOIN area_responsibles ar ON ar.user_id=u.id LEFT JOIN areas a ON a.id=ar.area_id ORDER BY u.name`);res.json({users:r.rows})}catch{res.status(503).json({error:'Banco de dados indisponível.'})}});
 app.get('/api/admin/requests',admin,async(req,res)=>{const r=await db(`SELECT r.*,u.name requester,u.email,a.name area,t.name type FROM requests r JOIN users u ON u.id=r.user_id LEFT JOIN areas a ON a.id=r.area_id LEFT JOIN request_types t ON t.id=r.type_id ORDER BY r.created_at DESC`);res.json({requests:r.rows})});
 app.get('/api/admin/requests/:id',admin,async(req,res)=>{try{const r=await db(`SELECT r.*,u.name requester,u.email requester_email,a.name area,t.name type FROM requests r JOIN users u ON u.id=r.user_id LEFT JOIN areas a ON a.id=r.area_id LEFT JOIN request_types t ON t.id=r.type_id WHERE r.id=$1`,[req.params.id]);if(!r.rows[0])return res.status(404).json({error:'Solicitação não encontrada.'});const h=await db('SELECT action,details,created_at FROM request_history WHERE request_id=$1 ORDER BY created_at',[req.params.id]);res.json({request:r.rows[0],history:h.rows})}catch(e){res.status(503).json({error:'Banco de dados indisponível.'})}});

@@ -17,7 +17,7 @@ Para autenticação, cadastro e solicitações funcionarem de forma persistente,
 
 ## Administrador
 
-Defina `ADMIN_EMAIL`, `ADMIN_PASSWORD` e `JWT_SECRET` no ambiente. Na inicialização, a conta indicada por `ADMIN_EMAIL` é criada/atualizada como administradora.
+Defina `ADMIN_USERNAME`, `ADMIN_PASSWORD`, `ADMIN_EMAIL` (para recuperação de senha) e `JWT_SECRET` no ambiente. Na inicialização, a conta indicada por `ADMIN_USERNAME` é criada/atualizada como administradora. O e-mail não é usado para escolher qual conta vira administradora.
 
 ## Áreas padrão
 
