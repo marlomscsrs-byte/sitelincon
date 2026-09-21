@@ -13,3 +13,7 @@
 .notification-trigger .notification-badge{position:absolute!important;right:-3px!important;top:-3px!important;z-index:20!important;transform:none!important;pointer-events:none;}
 .profile{overflow:visible!important;}
 @media(max-width:560px){.profile{right:10px!important;max-width:calc(100vw - 20px);}.profile .profile-name{max-width:90px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}.profile .bell{flex:0 0 39px;}}
+
+/* Correção definitiva do contador do sino */
+.head-actions > .bell.notification-trigger, .head-actions > .bell {position:relative!important;display:grid!important;place-items:center!important;flex:0 0 39px!important;width:39px!important;height:39px!important;overflow:visible!important;}
+.head-actions > .bell .notification-badge {position:absolute!important;top:-4px!important;right:-4px!important;z-index:30!important;margin:0!important;transform:none!important;pointer-events:none!important;}
