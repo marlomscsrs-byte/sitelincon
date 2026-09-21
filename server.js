@@ -88,6 +88,65 @@ app.post('/api/requests',auth,async(req,res)=>{try{const{title,description,type_
 app.get('/api/requests/mine',auth,async(req,res)=>{try{const r=await db(`SELECT r.*,a.name area,t.name type FROM requests r LEFT JOIN areas a ON a.id=r.area_id LEFT JOIN request_types t ON t.id=r.type_id WHERE r.user_id=$1 ORDER BY r.created_at DESC`,[req.user.id]);res.json({requests:r.rows})}catch{res.status(503).json({error:'Banco de dados indisponível.'})}});
 app.get('/api/requests/:protocol',async(req,res)=>{try{const r=await db(`SELECT r.protocol,r.title,r.description,r.priority,r.status,r.desired_date,r.created_at,r.updated_at,a.name area,t.name type FROM requests r LEFT JOIN areas a ON a.id=r.area_id LEFT JOIN request_types t ON t.id=r.type_id WHERE r.protocol=$1`,[req.params.protocol]);if(!r.rows[0])return res.status(404).json({error:'Protocolo não encontrado.'});const h=await db('SELECT action,details,created_at FROM request_history WHERE request_id=(SELECT id FROM requests WHERE protocol=$1) ORDER BY created_at',[req.params.protocol]);res.json({request:r.rows[0],history:h.rows})}catch{res.status(503).json({error:'Banco de dados indisponível.'})}});
 app.get('/api/admin/users',admin,async(req,res)=>{try{const r=await db(`SELECT u.id,u.name,u.username,u.email,u.staff_id,u.rp_id,u.role_name,u.active,u.warnings,u.last_promotion,a.name area FROM users u LEFT JOIN area_responsibles ar ON ar.user_id=u.id LEFT JOIN areas a ON a.id=ar.area_id ORDER BY u.name`);res.json({users:r.rows})}catch{res.status(503).json({error:'Banco de dados indisponível.'})}});
+app.get('/api/admin/users/:id',admin,async(req,res)=>{try{
+  const id=Number(req.params.id);
+  if(!Number.isInteger(id)||id<1)return res.status(400).json({error:'Usuário inválido.'});
+  const u=await db(`SELECT u.id,u.name,u.username,u.email,u.staff_id,u.rp_id,u.role_name,u.active,u.warnings,u.last_promotion,u.is_admin,ar.area_id,a.name area
+    FROM users u
+    LEFT JOIN area_responsibles ar ON ar.user_id=u.id
+    LEFT JOIN areas a ON a.id=ar.area_id
+    WHERE u.id=$1 ORDER BY ar.area_id NULLS FIRST LIMIT 1`,[id]);
+  if(!u.rows[0])return res.status(404).json({error:'Usuário não encontrado.'});
+  const [roles,areas]=await Promise.all([
+    db('SELECT name FROM hierarchy_roles WHERE active=true ORDER BY level DESC,name'),
+    db('SELECT id,name FROM areas WHERE active=true ORDER BY name')
+  ]);
+  res.json({user:u.rows[0],roles:roles.rows,areas:areas.rows});
+}catch(e){console.error('GET /api/admin/users/:id:',e);res.status(503).json({error:'Banco de dados indisponível.'})}});
+
+app.patch('/api/admin/users/:id',admin,async(req,res)=>{try{
+  const id=Number(req.params.id);
+  if(!Number.isInteger(id)||id<1)return res.status(400).json({error:'Usuário inválido.'});
+  if(id===Number(req.user.id))return res.status(400).json({error:'Por segurança, o administrador não pode editar a própria conta por esta tela.'});
+  const current=await db('SELECT * FROM users WHERE id=$1',[id]);
+  if(!current.rows[0])return res.status(404).json({error:'Usuário não encontrado.'});
+  const old=current.rows[0];
+  const name=String(req.body.name??old.name).trim();
+  const username=String(req.body.username??old.username).trim().toLowerCase();
+  const email=String(req.body.email??old.email).trim().toLowerCase();
+  const staffId=String(req.body.staff_id??old.staff_id??'').trim()||null;
+  const rpId=String(req.body.rp_id??old.rp_id??'').trim()||null;
+  const roleName=String(req.body.role_name??old.role_name??'Suporte').trim()||'Suporte';
+  const warningsRaw=Number(req.body.warnings??old.warnings??0);
+  const warnings=Number.isInteger(warningsRaw)&&warningsRaw>=0?warningsRaw:null;
+  const active=typeof req.body.active==='boolean'?req.body.active:old.active!==false;
+  const lastPromotion=req.body.last_promotion?String(req.body.last_promotion).slice(0,10):null;
+  const areaId=req.body.area_id===null||req.body.area_id===''?null:Number(req.body.area_id);
+  if(!name||!username||!email)return res.status(400).json({error:'Nome, nome de usuário e e-mail são obrigatórios.'});
+  if(!/^[a-z0-9._-]{3,30}$/.test(username))return res.status(400).json({error:'Nome de usuário inválido.'});
+  if(warnings===null)return res.status(400).json({error:'Advertências inválidas.'});
+  if(areaId!==null&&!Number.isInteger(areaId))return res.status(400).json({error:'Área inválida.'});
+  const dupUser=await db('SELECT id FROM users WHERE LOWER(username)=LOWER($1) AND id<>$2',[username,id]);
+  if(dupUser.rows[0])return res.status(409).json({error:'Este nome de usuário já está em uso.'});
+  const dupEmail=await db('SELECT id FROM users WHERE LOWER(email)=LOWER($1) AND id<>$2',[email,id]);
+  if(dupEmail.rows[0])return res.status(409).json({error:'Este e-mail já está cadastrado.'});
+  let passwordHash=old.password_hash;
+  if(req.body.password){
+    const password=String(req.body.password);
+    if(password.length<6)return res.status(400).json({error:'A nova senha precisa ter pelo menos 6 caracteres.'});
+    passwordHash=await bcrypt.hash(password,12);
+  }
+  const r=await db(`UPDATE users SET name=$1,username=$2,email=$3,password_hash=$4,staff_id=$5,rp_id=$6,role_name=$7,active=$8,warnings=$9,last_promotion=$10 WHERE id=$11
+    RETURNING id,name,username,email,staff_id,rp_id,role_name,active,warnings,last_promotion,is_admin`,[name,username,email,passwordHash,staffId,rpId,roleName,active,warnings,lastPromotion,id]);
+  const currentArea=await db('SELECT area_id FROM area_responsibles WHERE user_id=$1 ORDER BY area_id LIMIT 1',[id]);
+  if(areaId===null){
+    if(currentArea.rows[0])await db('DELETE FROM area_responsibles WHERE user_id=$1 AND area_id=$2',[id,currentArea.rows[0].area_id]);
+  }else{
+    if(currentArea.rows[0]&&Number(currentArea.rows[0].area_id)!==areaId)await db('DELETE FROM area_responsibles WHERE user_id=$1 AND area_id=$2',[id,currentArea.rows[0].area_id]);
+    await db('INSERT INTO area_responsibles(area_id,user_id) VALUES($1,$2) ON CONFLICT(area_id) DO UPDATE SET user_id=EXCLUDED.user_id',[areaId,id]);
+  }
+  res.json({user:r.rows[0],message:'Cadastro atualizado com sucesso.'});
+}catch(e){console.error('PATCH /api/admin/users/:id:',e);res.status(e.code==='23505'?409:500).json({error:e.code==='23505'?'Este usuário ou e-mail já está cadastrado.':'Não foi possível atualizar o cadastro.'})}});
 app.get('/api/admin/requests',admin,async(req,res)=>{const r=await db(`SELECT r.*,u.name requester,u.email,a.name area,t.name type FROM requests r JOIN users u ON u.id=r.user_id LEFT JOIN areas a ON a.id=r.area_id LEFT JOIN request_types t ON t.id=r.type_id ORDER BY r.created_at DESC`);res.json({requests:r.rows})});
 app.get('/api/admin/requests/:id',admin,async(req,res)=>{try{const r=await db(`SELECT r.*,u.name requester,u.email requester_email,a.name area,t.name type FROM requests r JOIN users u ON u.id=r.user_id LEFT JOIN areas a ON a.id=r.area_id LEFT JOIN request_types t ON t.id=r.type_id WHERE r.id=$1`,[req.params.id]);if(!r.rows[0])return res.status(404).json({error:'Solicitação não encontrada.'});const h=await db('SELECT action,details,created_at FROM request_history WHERE request_id=$1 ORDER BY created_at',[req.params.id]);res.json({request:r.rows[0],history:h.rows})}catch(e){res.status(503).json({error:'Banco de dados indisponível.'})}});
 app.patch('/api/admin/requests/:id',admin,async(req,res)=>{try{
