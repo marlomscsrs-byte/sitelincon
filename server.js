@@ -15,7 +15,8 @@ async function init(){
  ALTER TABLE users ADD COLUMN IF NOT EXISTS username TEXT;
  ALTER TABLE users ADD COLUMN IF NOT EXISTS staff_id TEXT;
  ALTER TABLE users ADD COLUMN IF NOT EXISTS rp_id TEXT;
- ALTER TABLE users ADD COLUMN IF NOT EXISTS role_name TEXT DEFAULT 'Suporte';
+ ALTER TABLE users ADD COLUMN IF NOT EXISTS role_name TEXT DEFAULT 'Player';
+ ALTER TABLE users ALTER COLUMN role_name SET DEFAULT 'Player';
  ALTER TABLE users ADD COLUMN IF NOT EXISTS active BOOLEAN DEFAULT TRUE;
  ALTER TABLE users ADD COLUMN IF NOT EXISTS warnings INT DEFAULT 0;
  ALTER TABLE users ADD COLUMN IF NOT EXISTS last_promotion DATE;
@@ -33,7 +34,8 @@ async function init(){
  await db('ALTER TABLE users ALTER COLUMN username SET NOT NULL');
  for(const a of ['Hospital','Eventos','Peds','Creators','Mecânicas','Restaurantes','Polícia','Ilegal','Denúncias','Jornal','Judiciário','Screen Share','Administrativa','Desenvolvimento'])await db('INSERT INTO areas(name) VALUES($1) ON CONFLICT(name) DO NOTHING',[a]);
  for(const t of ['Solicitação','Sugestão','Correção'])await db('INSERT INTO request_types(name) VALUES($1) ON CONFLICT(name) DO NOTHING',[t]);
- for(const [name,level] of [['Founder',100],['Director',90],['Coordenador',80],['Supervisor',70],['Administrador',60],['Moderador',40],['Suporte',20]])await db('INSERT INTO hierarchy_roles(name,level) VALUES($1,$2) ON CONFLICT(name) DO NOTHING',[name,level]);
+ for(const [name,level] of [['Founder',100],['Director',90],['Coordenador',80],['Supervisor',70],['Administrador',60],['Moderador',40],['Suporte',20],['Player',0]])await db('INSERT INTO hierarchy_roles(name,level) VALUES($1,$2) ON CONFLICT(name) DO NOTHING',[name,level]);
+ await db("UPDATE users SET role_name='Player' WHERE is_admin=false AND (role_name IS NULL OR TRIM(role_name)='' OR role_name='Suporte')");
  if(process.env.ADMIN_PASSWORD){
    const hash=await bcrypt.hash(process.env.ADMIN_PASSWORD,12);
    const adminUsername=(String(process.env.ADMIN_USERNAME||'admin').trim().toLowerCase().replace(/[^a-z0-9._-]/g,'')||'admin');
@@ -71,17 +73,17 @@ async function init(){
 }
 function tokenFor(u){return jwt.sign({id:u.id},JWT_SECRET,{expiresIn:'7d'})}async function auth(req,res,next){try{const h=req.headers.authorization||'';if(!h.startsWith('Bearer '))return res.status(401).json({error:'Não autenticado'});req.user=jwt.verify(h.slice(7),JWT_SECRET);const r=await db('SELECT id,is_admin,active FROM users WHERE id=$1',[req.user.id]);if(!r.rows[0]||r.rows[0].active===false)return res.status(401).json({error:'Sessão inválida'});req.user.is_admin=!!r.rows[0].is_admin;next()}catch{return res.status(401).json({error:'Sessão expirada'})}}function admin(req,res,next){return auth(req,res,()=>req.user.is_admin?next():res.status(403).json({error:'Acesso negado'}))}
 app.get('/api/health',(req,res)=>res.json({ok:true,database:!!pool}));
-app.get('/api/auth/me',auth,async(req,res)=>{const r=await db('SELECT id,name,username,email,is_admin FROM users WHERE id=$1',[req.user.id]);res.json({user:r.rows[0]||null})});
+app.get('/api/auth/me',auth,async(req,res)=>{const r=await db('SELECT id,name,username,email,is_admin,role_name,staff_id,rp_id,warnings,last_promotion FROM users WHERE id=$1',[req.user.id]);res.json({user:r.rows[0]||null})});
 app.post('/api/auth/register',async(req,res)=>{try{
  const{name,username,email,password}=req.body;
  const u=String(username||'').trim().toLowerCase();
  if(!name||!u||!email||!password||password.length<6)return res.status(400).json({error:'Preencha nome, nome de usuário, e-mail e senha com pelo menos 6 caracteres.'});
  if(!/^[a-z0-9._-]{3,30}$/.test(u))return res.status(400).json({error:'O nome de usuário deve ter 3 a 30 caracteres e usar apenas letras, números, ponto, hífen ou sublinhado.'});
  const hash=await bcrypt.hash(password,12);
- const r=await db('INSERT INTO users(name,username,email,password_hash) VALUES($1,$2,$3,$4) RETURNING id,name,username,email,is_admin',[name.trim(),u,email.trim().toLowerCase(),hash]);
+ const r=await db("INSERT INTO users(name,username,email,password_hash,role_name) VALUES($1,$2,$3,'Player') RETURNING id,name,username,email,is_admin,role_name",[name.trim(),u,email.trim().toLowerCase(),hash]);
  res.json({user:r.rows[0],token:tokenFor(r.rows[0])})
 }catch(e){res.status(e.code==='23505'?409:500).json({error:e.code==='23505'?(String(e.detail||'').includes('username')?'Este nome de usuário já está em uso.':String(e.detail||'').includes('email')?'Este e-mail já está cadastrado.':'Nome de usuário ou e-mail já cadastrado.'):'Não foi possível criar a conta.'})}});
-app.post('/api/auth/login',async(req,res)=>{try{const{username,password}=req.body;const uName=String(username||'').trim().toLowerCase();const r=await db('SELECT * FROM users WHERE username=$1',[uName]);if(!r.rows[0]||!(await bcrypt.compare(password||'',r.rows[0].password_hash)))return res.status(401).json({error:'Nome de usuário ou senha inválidos.'});const u=r.rows[0];res.json({user:{id:u.id,name:u.name,username:u.username,email:u.email,is_admin:u.is_admin},token:tokenFor(u)})}catch{res.status(503).json({error:'Banco de dados indisponível.'})}});
+app.post('/api/auth/login',async(req,res)=>{try{const{username,password}=req.body;const uName=String(username||'').trim().toLowerCase();const r=await db('SELECT * FROM users WHERE username=$1',[uName]);if(!r.rows[0]||!(await bcrypt.compare(password||'',r.rows[0].password_hash)))return res.status(401).json({error:'Nome de usuário ou senha inválidos.'});const u=r.rows[0];res.json({user:{id:u.id,name:u.name,username:u.username,email:u.email,is_admin:u.is_admin,role_name:u.role_name},token:tokenFor(u)})}catch{res.status(503).json({error:'Banco de dados indisponível.'})}});
 app.get('/api/options',async(req,res)=>{try{const[a,t]=await Promise.all([db('SELECT id,name FROM areas WHERE active=true ORDER BY name'),db('SELECT id,name FROM request_types WHERE active=true ORDER BY name')]);res.json({areas:a.rows,types:t.rows})}catch{res.json({areas:['Creators','Denúncias','Eventos','Hospital','Ilegal','Jornal','Judiciário','Mecânicas','Peds','Polícia','Restaurantes','Screen Share','Administrativa','Desenvolvimento'].map((name,i)=>({id:i+1,name})),types:['Solicitação','Sugestão','Correção'].map((name,i)=>({id:i+1,name}))})}});
 function protocol(id){return `SOL-${String(id).padStart(6,'0')}`}
 app.post('/api/requests',auth,async(req,res)=>{try{const{title,description,type_id,area_id,priority,desired_date}=req.body;if(!title||!description||!priority)return res.status(400).json({error:'Preencha os campos obrigatórios.'});const temporaryProtocol=`TMP-${Date.now()}-${req.user.id}-${Math.random().toString(36).slice(2,8)}`;const r=await db('INSERT INTO requests(protocol,user_id,title,description,type_id,area_id,priority,status,desired_date) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *',[temporaryProtocol,req.user.id,title,description,type_id||null,area_id||null,priority,'Em análise',desired_date||null]);const p=protocol(r.rows[0].id);await db('UPDATE requests SET protocol=$1 WHERE id=$2',[p,r.rows[0].id]);await db('INSERT INTO request_history(request_id,action,details) VALUES($1,$2,$3)',[r.rows[0].id,'Criação','Solicitação registrada']);res.json({request:{...r.rows[0],protocol:p}})}catch(e){console.error('POST /api/requests:',e);res.status(503).json({error:'Não foi possível registrar a solicitação.'})}});
