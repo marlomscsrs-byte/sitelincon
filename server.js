@@ -22,6 +22,8 @@ async function init(){
  ALTER TABLE users ADD COLUMN IF NOT EXISTS active BOOLEAN DEFAULT TRUE;
  ALTER TABLE users ADD COLUMN IF NOT EXISTS warnings INT DEFAULT 0;
  ALTER TABLE users ADD COLUMN IF NOT EXISTS last_promotion DATE;
+ ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_url TEXT;
+ ALTER TABLE users ADD COLUMN IF NOT EXISTS bio TEXT;
  CREATE TABLE IF NOT EXISTS area_responsibles(id SERIAL PRIMARY KEY,area_id INT UNIQUE REFERENCES areas(id) ON DELETE CASCADE,user_id INT REFERENCES users(id) ON DELETE SET NULL);
  CREATE TABLE IF NOT EXISTS hierarchy_roles(id SERIAL PRIMARY KEY,name TEXT UNIQUE NOT NULL,level INT NOT NULL DEFAULT 0,active BOOLEAN DEFAULT TRUE);`);
  // Migração dos usuários antigos: cria um nome de usuário único a partir do e-mail/nome.
@@ -75,17 +77,41 @@ async function init(){
 }
 function tokenFor(u){return jwt.sign({id:u.id},JWT_SECRET,{expiresIn:'7d'})}async function auth(req,res,next){try{const h=req.headers.authorization||'';if(!h.startsWith('Bearer '))return res.status(401).json({error:'Não autenticado'});req.user=jwt.verify(h.slice(7),JWT_SECRET);const r=await db('SELECT id,is_admin,active FROM users WHERE id=$1',[req.user.id]);if(!r.rows[0]||r.rows[0].active===false)return res.status(401).json({error:'Sessão inválida'});req.user.is_admin=!!r.rows[0].is_admin;next()}catch{return res.status(401).json({error:'Sessão expirada'})}}function admin(req,res,next){return auth(req,res,()=>req.user.is_admin?next():res.status(403).json({error:'Acesso negado'}))}
 app.get('/api/health',(req,res)=>res.json({ok:true,database:!!pool}));
-app.get('/api/auth/me',auth,async(req,res)=>{const r=await db('SELECT id,name,username,email,is_admin,role_name,staff_id,rp_id,warnings,last_promotion FROM users WHERE id=$1',[req.user.id]);res.json({user:r.rows[0]||null})});
+app.get('/api/auth/me',auth,async(req,res)=>{const r=await db('SELECT id,name,username,email,is_admin,role_name,staff_id,rp_id,warnings,last_promotion,avatar_url,bio FROM users WHERE id=$1',[req.user.id]);res.json({user:r.rows[0]||null})});
 app.post('/api/auth/register',async(req,res)=>{try{
  const{name,username,email,password}=req.body;
  const u=String(username||'').trim().toLowerCase();
  if(!name||!u||!email||!password||password.length<6)return res.status(400).json({error:'Preencha nome, nome de usuário, e-mail e senha com pelo menos 6 caracteres.'});
  if(!/^[a-z0-9._-]{3,30}$/.test(u))return res.status(400).json({error:'O nome de usuário deve ter 3 a 30 caracteres e usar apenas letras, números, ponto, hífen ou sublinhado.'});
  const hash=await bcrypt.hash(password,12);
- const r=await db("INSERT INTO users(name,username,email,password_hash,role_name) VALUES($1,$2,$3,'Player') RETURNING id,name,username,email,is_admin,role_name",[name.trim(),u,email.trim().toLowerCase(),hash]);
+ const r=await db("INSERT INTO users(name,username,email,password_hash,role_name) VALUES($1,$2,$3,$4,$5) RETURNING id,name,username,email,is_admin,role_name,avatar_url,bio",[name.trim(),u,email.trim().toLowerCase(),hash]);
  res.json({user:r.rows[0],token:tokenFor(r.rows[0])})
 }catch(e){res.status(e.code==='23505'?409:500).json({error:e.code==='23505'?(String(e.detail||'').includes('username')?'Este nome de usuário já está em uso.':String(e.detail||'').includes('email')?'Este e-mail já está cadastrado.':'Nome de usuário ou e-mail já cadastrado.'):'Não foi possível criar a conta.'})}});
-app.post('/api/auth/login',async(req,res)=>{try{const{username,password}=req.body;const uName=String(username||'').trim().toLowerCase();const r=await db('SELECT * FROM users WHERE username=$1',[uName]);if(!r.rows[0]||!(await bcrypt.compare(password||'',r.rows[0].password_hash)))return res.status(401).json({error:'Nome de usuário ou senha inválidos.'});const u=r.rows[0];res.json({user:{id:u.id,name:u.name,username:u.username,email:u.email,is_admin:u.is_admin,role_name:u.role_name},token:tokenFor(u)})}catch{res.status(503).json({error:'Banco de dados indisponível.'})}});
+app.post('/api/auth/login',async(req,res)=>{try{const{username,password}=req.body;const uName=String(username||'').trim().toLowerCase();const r=await db('SELECT * FROM users WHERE username=$1',[uName]);if(!r.rows[0]||!(await bcrypt.compare(password||'',r.rows[0].password_hash)))return res.status(401).json({error:'Nome de usuário ou senha inválidos.'});const u=r.rows[0];res.json({user:{id:u.id,name:u.name,username:u.username,email:u.email,is_admin:u.is_admin,role_name:u.role_name,avatar_url:u.avatar_url||null,bio:u.bio||''},token:tokenFor(u)})}catch{res.status(503).json({error:'Banco de dados indisponível.'})}});
+app.get('/api/profile',auth,async(req,res)=>{try{
+ const r=await db('SELECT id,name,username,email,is_admin,role_name,staff_id,rp_id,warnings,last_promotion,avatar_url,bio FROM users WHERE id=$1',[req.user.id]);
+ if(!r.rows[0])return res.status(404).json({error:'Usuário não encontrado.'});
+ res.json({user:r.rows[0]});
+}catch(e){console.error('GET /api/profile:',e);res.status(503).json({error:'Não foi possível carregar o perfil.'})}});
+
+app.patch('/api/profile',auth,async(req,res)=>{try{
+ const current=await db('SELECT * FROM users WHERE id=$1',[req.user.id]);
+ if(!current.rows[0])return res.status(404).json({error:'Usuário não encontrado.'});
+ const old=current.rows[0];
+ const name=String(req.body.name??old.name).trim();
+ const bio=String(req.body.bio??old.bio??'').trim().slice(0,500);
+ let avatar=req.body.avatar_url;
+ if(avatar===undefined)avatar=old.avatar_url||null;
+ if(avatar!==null && avatar!==''){
+   avatar=String(avatar);
+   if(!/^data:image\/(png|jpe?g|webp|gif);base64,[A-Za-z0-9+/=]+$/i.test(avatar))return res.status(400).json({error:'Imagem de perfil inválida.'});
+   if(avatar.length>450000)return res.status(400).json({error:'A foto é muito grande. Escolha outra imagem.'});
+ }else avatar=null;
+ if(!name)return res.status(400).json({error:'Informe seu nome.'});
+ const r=await db('UPDATE users SET name=$1,bio=$2,avatar_url=$3 WHERE id=$4 RETURNING id,name,username,email,is_admin,role_name,staff_id,rp_id,warnings,last_promotion,avatar_url,bio',[name,bio,avatar,req.user.id]);
+ res.json({user:r.rows[0]});
+}catch(e){console.error('PATCH /api/profile:',e);res.status(500).json({error:'Não foi possível salvar seu perfil.'})}});
+
 app.get('/api/notifications',auth,async(req,res)=>{try{const r=await db(`SELECT n.id,n.type,n.title,n.message,n.request_id,n.created_at,n.read_at,req.protocol FROM notifications n LEFT JOIN requests req ON req.id=n.request_id WHERE n.user_id=$1 ORDER BY n.created_at DESC LIMIT 30`,[req.user.id]);const unread=await db('SELECT COUNT(*)::int count FROM notifications WHERE user_id=$1 AND read_at IS NULL',[req.user.id]);res.json({notifications:r.rows,unread:unread.rows[0]?.count||0})}catch(e){console.error('GET /api/notifications:',e);res.status(503).json({error:'Não foi possível carregar as notificações.'})}});
 app.patch('/api/notifications/:id/read',auth,async(req,res)=>{try{const r=await db('UPDATE notifications SET read_at=COALESCE(read_at,NOW()) WHERE id=$1 AND user_id=$2 RETURNING id',[req.params.id,req.user.id]);if(!r.rows[0])return res.status(404).json({error:'Notificação não encontrada.'});res.json({ok:true})}catch(e){res.status(500).json({error:'Não foi possível atualizar a notificação.'})}});
 app.patch('/api/notifications/read-all',auth,async(req,res)=>{try{await db('UPDATE notifications SET read_at=NOW() WHERE user_id=$1 AND read_at IS NULL',[req.user.id]);res.json({ok:true})}catch(e){res.status(500).json({error:'Não foi possível marcar as notificações.'})}});

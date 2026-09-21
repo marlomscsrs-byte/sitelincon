@@ -10,6 +10,9 @@ function ensureNotificationPanel(){if($('#notificationPanel'))return;document.bo
 function positionNotificationPanel(anchor){const panel=$('#notificationPanel');if(!panel)return;const r=anchor?.getBoundingClientRect();const gap=8;const margin=12;panel.style.left='auto';panel.style.right=`${margin}px`;panel.style.top=`${Math.max(70,Math.min(r?r.bottom+gap:70,window.innerHeight-margin-120))}px`;if(window.innerWidth<=560){panel.style.left=`${margin}px`;panel.style.right=`${margin}px`;panel.style.top='70px'}}
 async function loadNotifications(silent=true){if(!currentUser)return;ensureNotificationPanel();try{const d=await api('/api/notifications');document.querySelectorAll('[data-notification-count]').forEach(el=>{el.textContent=d.unread||0;el.classList.toggle('hidden',!(d.unread>0))});const summary=$('[data-notification-summary]');if(summary)summary.textContent=d.unread?`${d.unread} não lida${d.unread===1?'':'s'}`:'Tudo lido';const list=$('[data-notification-list]');if(!list)return;if(!d.notifications.length){list.innerHTML='<div class="notification-empty">Nenhuma notificação.</div>';return}list.innerHTML=d.notifications.map(n=>`<button type="button" class="notification-item ${n.read_at?'':'unread'}" data-notification-id="${n.id}" data-notification-request="${n.request_id||''}" data-notification-protocol="${n.protocol||''}"><span class="notification-dot"></span><span><b>${escapeHtml(n.title)}</b><small>${escapeHtml(n.message)}</small><time>${fmtDate(n.created_at)}</time></span></button>`).join('')}catch(err){if(!silent)toast(err.message,true)}}
 function escapeHtml(v){return String(v??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#039;')}
+function avatarMarkup(user,cls='avatar'){const name=String(user?.name||'Usuário');const src=user?.avatar_url;return src?`<img class="${cls} avatar-image" src="${src}" alt="Foto de perfil">`:`<span class="${cls}">${escapeHtml(name.trim().charAt(0).toUpperCase()||'U')}</span>`}
+function updatePublicIdentity(){const name=(currentUser?.name||'Usuário').split(' ')[0];const label=$('#headUser');if(label)label.textContent=name;const av=$('#headAvatar');if(av)av.outerHTML=avatarMarkup(currentUser,'avatar');}
+
 async function toggleNotifications(e){e?.stopPropagation();ensureNotificationPanel();const panel=$('#notificationPanel');const anchor=e?.currentTarget||document.querySelector('.notification-trigger')||document.querySelector('.bell');if(panel.classList.contains('hidden')){positionNotificationPanel(anchor);panel.classList.remove('hidden');await loadNotifications(false)}else panel.classList.add('hidden')}
 async function handleNotificationClick(el){const id=el.dataset.notificationId;const requestId=el.dataset.notificationRequest;const protocol=el.dataset.notificationProtocol;try{await api(`/api/notifications/${id}/read`,{method:'PATCH'});el.classList.remove('unread');await loadNotifications();$('#notificationPanel')?.classList.add('hidden');if(requestId){if(currentUser?.is_admin)await openRequestDetails(Number(requestId),protocol);else await openUserRequestDetails(protocol)}}catch(err){toast(err.message,true)}}
 async function markAllNotificationsRead(){try{await api('/api/notifications/read-all',{method:'PATCH'});await loadNotifications();}catch(err){toast(err.message,true)}}
@@ -22,8 +25,8 @@ async function login(e){e.preventDefault();try{const d=await api('/api/auth/logi
 async function register(e){e.preventDefault();try{const d=await api('/api/auth/register',{method:'POST',body:JSON.stringify({name:$('#regName').value,username:$('#regUsername').value,email:$('#regEmail').value,password:$('#regPass').value})});localStorage.setItem('villa_token',d.token);currentUser=d.user;closeModal();openUser();toast('Conta criada com sucesso.')}catch(err){toast(err.message,true)}}
 async function forgot(e){e.preventDefault();try{const d=await api('/api/auth/forgot',{method:'POST',body:JSON.stringify({username:$('#forgotUsername').value,email:$('#forgotEmail').value})});showModal(`<h2>Definir nova senha</h2><p>Os dados foram conferidos. Crie uma nova senha para sua conta.</p><form class="modal-form" onsubmit="resetPassword(event,${JSON.stringify(d.token)})"><input id="resetPass" type="password" autocomplete="new-password" minlength="6" placeholder="Nova senha (mín. 6 caracteres)" required><input id="resetPass2" type="password" autocomplete="new-password" minlength="6" placeholder="Confirme a nova senha" required><button class="btn primary">Alterar senha</button></form>`)}catch(err){toast(err.message,true)}}
 async function resetPassword(e,token){e.preventDefault();const a=$('#resetPass').value,b=$('#resetPass2').value;if(a!==b)return toast('As senhas não conferem.',true);try{const d=await api('/api/auth/reset',{method:'POST',body:JSON.stringify({token,password:a})});closeModal();toast(d.message)}catch(err){toast(err.message,true)}}
-function logout(){clearInterval(window.__notificationTimer);$('#notificationPanel')?.classList.add('hidden');localStorage.removeItem('villa_token');currentUser=null;$('#userArea').classList.add('hidden');$('#public').classList.remove('hidden');$('#headUser').textContent='Entrar';document.querySelector('.public-head')?.classList.remove('hidden');toast('Você saiu da conta.')}
-function openUser(){if(!currentUser)return;startNotificationPolling();$('#public').classList.add('hidden');$('#userArea').classList.remove('hidden');$('#headUser').textContent=(currentUser.name||'Usuário').split(' ')[0];const admin=document.querySelector('[data-admin-nav]');if(admin)admin.classList.toggle('hidden',!currentUser.is_admin);userView('userHome')}
+function logout(){clearInterval(window.__notificationTimer);$('#notificationPanel')?.classList.add('hidden');localStorage.removeItem('villa_token');currentUser=null;$('#userArea').classList.add('hidden');$('#public').classList.remove('hidden');$('#headUser').textContent='Entrar';const headAvatar=$('#headAvatar');if(headAvatar)headAvatar.outerHTML='<span class="avatar" id="headAvatar">V</span>';document.querySelector('.public-head')?.classList.remove('hidden');toast('Você saiu da conta.')}
+function openUser(){if(!currentUser)return;startNotificationPolling();$('#public').classList.add('hidden');$('#userArea').classList.remove('hidden');updatePublicIdentity();const admin=document.querySelector('[data-admin-nav]');if(admin)admin.classList.toggle('hidden',!currentUser.is_admin);userView('userHome')}
 function stat(label,num,sub,cls,ico){return `<article class="stat"><span class="ico ${cls}">${ico}</span><div><b>${num}</b><h3>${label}</h3><small>${sub}</small></div></article>`}
 function status(s){const c=s==='Concluída'?'done':s==='Em análise'?'open':s==='Cancelada'?'cancel':'run';return `<span class="badge ${c}">${s}</span>`}
 function priority(p){return `<span class="priority ${p==='Alta'||p==='Crítica'?'high':p==='Média'?'med':'low'}">${p==='Alta'||p==='Crítica'?'↑':p==='Baixa'?'↓':'—'} ${p}</span>`}
@@ -31,9 +34,76 @@ function fmtDate(v){if(!v)return '—';const d=new Date(v);return Number.isNaN(d
 function fmtDay(v){if(!v)return '—';const d=new Date(String(v).slice(0,10)+'T00:00:00');return Number.isNaN(d.getTime())?v:d.toLocaleDateString('pt-BR')}
 async function loadOptions(){try{options=await api('/api/options')}catch{options={areas:fallbackAreas,types:fallbackTypes}}}
 
-async function userView(v){if(v==='newRequest'){requestPage();return}if(v==='myRequests'){myRequestsPage();return}document.querySelectorAll('[data-nav]').forEach(x=>x.classList.toggle('active',x.dataset.nav==='userHome'));let rows=[],stats={total:0,run:0,done:0,cancel:0};try{const d=await api('/api/requests/mine');rows=d.requests;stats={total:rows.length,run:rows.filter(r=>r.status==='Em andamento').length,done:rows.filter(r=>r.status==='Concluída').length,cancel:rows.filter(r=>r.status==='Cancelada').length}}catch(err){toast(err.message,true)}
+
+async function profilePage(){
+ document.querySelectorAll('[data-nav]').forEach(x=>x.classList.toggle('active',x.dataset.nav==='profile'));
+ try{currentUser=(await api('/api/profile')).user}catch(err){return toast(err.message,true)}
+ const role=currentUser?.is_admin?'Administrador':(currentUser?.role_name||'Player');
+ $('#workspace').innerHTML=`<div class="page-head"><div><p class="eyebrow">MINHA CONTA</p><h1>Meu Perfil</h1><p>Personalize como seu perfil aparece no sistema.</p></div><button class="btn ghost" onclick="userView('userHome')">Voltar</button></div>
+ <section class="profile-card">
+   <div class="profile-cover">
+     <div class="profile-avatar-wrap" id="profileAvatarWrap">${avatarMarkup(currentUser,'profile-avatar')}</div>
+     <div><h2>${escapeHtml(currentUser.name||'Usuário')}</h2><p>@${escapeHtml(currentUser.username||'')}</p></div>
+   </div>
+   <form class="profile-form" id="profileForm">
+     <div class="profile-photo-actions"><label class="btn ghost profile-file-btn">Escolher foto<input id="profilePhoto" type="file" accept="image/png,image/jpeg,image/webp" hidden></label><button class="btn ghost" type="button" onclick="removeProfilePhoto()">Remover foto</button><small>PNG, JPG ou WEBP. A imagem será otimizada automaticamente.</small></div>
+     <div class="profile-grid">
+       <div class="field"><label>Nome de exibição</label><input id="profileName" maxlength="80" value="${escapeHtml(currentUser.name||'')}"></div>
+       <div class="field"><label>Nome de usuário</label><input value="${escapeHtml(currentUser.username||'')}" disabled></div>
+       <div class="field"><label>E-mail</label><input value="${escapeHtml(currentUser.email||'')}" disabled></div>
+       <div class="field"><label>Cargo</label><input value="${escapeHtml(role)}" disabled></div>
+       <div class="field profile-full"><label>Sobre você</label><textarea id="profileBio" maxlength="500" rows="4" placeholder="Escreva uma breve descrição...">${escapeHtml(currentUser.bio||'')}</textarea></div>
+     </div>
+     <div class="modal-actions"><button class="btn primary" type="submit">Salvar perfil</button></div>
+   </form>
+ </section>`;
+ const input=$('#profilePhoto');
+ if(input)input.addEventListener('change',handleProfilePhoto);
+ $('#profileForm')?.addEventListener('submit',saveProfile);
+}
+async function handleProfilePhoto(e){
+ const file=e.target.files?.[0];if(!file)return;
+ if(!/^image\/(png|jpeg|webp)$/.test(file.type))return toast('Escolha uma imagem PNG, JPG ou WEBP.',true);
+ try{
+   const data=await compressProfileImage(file);
+   currentUser.__pendingAvatar=data;
+   $('#profileAvatarWrap').innerHTML=avatarMarkup({...currentUser,avatar_url:data},'profile-avatar');
+ }catch(err){toast(err.message,true)}
+}
+function compressProfileImage(file){
+ return new Promise((resolve,reject)=>{
+   const reader=new FileReader();
+   reader.onerror=()=>reject(new Error('Não foi possível ler a imagem.'));
+   reader.onload=()=>{
+     const img=new Image();
+     img.onerror=()=>reject(new Error('Imagem inválida.'));
+     img.onload=()=>{
+       const max=512,scale=Math.min(1,max/Math.max(img.width,img.height));
+       const canvas=document.createElement('canvas');canvas.width=Math.max(1,Math.round(img.width*scale));canvas.height=Math.max(1,Math.round(img.height*scale));
+       const ctx=canvas.getContext('2d');ctx.drawImage(img,0,0,canvas.width,canvas.height);
+       let quality=.82,data=canvas.toDataURL('image/webp',quality);
+       while(data.length>360000 && quality>.45){quality-=.07;data=canvas.toDataURL('image/webp',quality)}
+       if(data.length>450000)reject(new Error('A foto não pôde ser reduzida o suficiente. Escolha uma imagem menor.'));
+       else resolve(data);
+     };
+     img.src=reader.result;
+   };
+   reader.readAsDataURL(file);
+ });
+}
+function removeProfilePhoto(){currentUser.__pendingAvatar=null;$('#profilePhoto')&&($('#profilePhoto').value='');const w=$('#profileAvatarWrap');if(w)w.innerHTML=avatarMarkup({...currentUser,avatar_url:null},'profile-avatar')}
+async function saveProfile(e){
+ e.preventDefault();const btn=e.currentTarget.querySelector('button[type="submit"]');if(btn){btn.disabled=true;btn.textContent='Salvando...'}
+ try{
+   const avatar=currentUser.__pendingAvatar!==undefined?currentUser.__pendingAvatar:currentUser.avatar_url||null;
+   const d=await api('/api/profile',{method:'PATCH',body:JSON.stringify({name:$('#profileName').value.trim(),bio:$('#profileBio').value.trim(),avatar_url:avatar})});
+   currentUser=d.user;delete currentUser.__pendingAvatar;updatePublicIdentity();toast('Perfil atualizado com sucesso.');profilePage();
+ }catch(err){toast(err.message,true)}finally{if(btn){btn.disabled=false;btn.textContent='Salvar perfil'}}
+}
+
+async function userView(v){if(v==='newRequest'){requestPage();return}if(v==='myRequests'){myRequestsPage();return}if(v==='profile'){profilePage();return}document.querySelectorAll('[data-nav]').forEach(x=>x.classList.toggle('active',x.dataset.nav==='userHome'));let rows=[],stats={total:0,run:0,done:0,cancel:0};try{const d=await api('/api/requests/mine');rows=d.requests;stats={total:rows.length,run:rows.filter(r=>r.status==='Em andamento').length,done:rows.filter(r=>r.status==='Concluída').length,cancel:rows.filter(r=>r.status==='Cancelada').length}}catch(err){toast(err.message,true)}
 const html=rows.slice(0,8).map(r=>`<tr><td>${r.protocol}</td><td><strong>${r.title}</strong></td><td>◈ ${r.area||'—'}</td><td>${r.type||'—'}</td><td>${priority(r.priority)}</td><td>${status(r.status)}</td><td>${fmtDay(r.created_at)}</td><td><button class="row-action" type="button" title="Ver solicitação" aria-label="Ver solicitação ${r.protocol}" data-user-request="${String(r.protocol).replace(/"/g, "&quot;")}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z"/><circle cx="12" cy="12" r="2.5"/></svg></button></td></tr>`).join('');
-$('#workspace').innerHTML=`<div class="dashboard-head"><div class="profile">${notificationBell()}<span class="avatar">${(currentUser?.name||'U')[0]}</span><div><span class="profile-name">${currentUser?.name||'Usuário'}</span><small>${currentUser?.is_admin?'Administrador':'Usuário'}</small></div></div><div class="dash-title"><p>VILLA • CENTRAL DE SOLICITAÇÕES</p><h1>Central de<br><strong>Solicitações</strong></h1></div></div><div class="welcome"><h2>Olá, ${(currentUser?.name||'Usuário').split(' ')[0]}.</h2><p>Acompanhe suas solicitações e veja o andamento dos seus chamados.</p></div><div class="stats">${stat('Minhas Solicitações',stats.total,'Total de registros','red','▤')}${stat('Em Andamento',stats.run,'Em atendimento','orange','◷')}${stat('Concluídas',stats.done,'Solicitações finalizadas','green','✓')}${stat('Canceladas',stats.cancel,'Solicitações canceladas','red','×')}</div><div class="actions"><button class="action primary" onclick="requestPage()">⊕　Nova Solicitação <span>›</span></button><button class="action" onclick="myRequestsPage()">▤　Minhas Solicitações <span>›</span></button></div><section class="section"><div class="section-head"><h2>▣　 Minhas Solicitações Recentes</h2><button class="btn-link" onclick="myRequestsPage()">Ver todas　›</button></div><div class="table-wrap"><table><thead><tr><th>#</th><th>Título</th><th>Área</th><th>Tipo</th><th>Prioridade</th><th>Status</th><th>Data de criação</th><th>Ações</th></tr></thead><tbody>${html||`<tr><td colspan="8"><div class="empty">Você ainda não possui solicitações.</div></td></tr>`}</tbody></table></div></section>`}
+$('#workspace').innerHTML=`<div class="dashboard-head"><div class="profile">${notificationBell()}${avatarMarkup(currentUser)}<div><span class="profile-name">${escapeHtml(currentUser?.name||'Usuário')}</span><small>${currentUser?.is_admin?'Administrador':'Usuário'}</small></div></div><div class="dash-title"><p>VILLA • CENTRAL DE SOLICITAÇÕES</p><h1>Central de<br><strong>Solicitações</strong></h1></div></div><div class="welcome"><h2>Olá, ${(currentUser?.name||'Usuário').split(' ')[0]}.</h2><p>Acompanhe suas solicitações e veja o andamento dos seus chamados.</p></div><div class="stats">${stat('Minhas Solicitações',stats.total,'Total de registros','red','▤')}${stat('Em Andamento',stats.run,'Em atendimento','orange','◷')}${stat('Concluídas',stats.done,'Solicitações finalizadas','green','✓')}${stat('Canceladas',stats.cancel,'Solicitações canceladas','red','×')}</div><div class="actions"><button class="action primary" onclick="requestPage()">⊕　Nova Solicitação <span>›</span></button><button class="action" onclick="myRequestsPage()">▤　Minhas Solicitações <span>›</span></button></div><section class="section"><div class="section-head"><h2>▣　 Minhas Solicitações Recentes</h2><button class="btn-link" onclick="myRequestsPage()">Ver todas　›</button></div><div class="table-wrap"><table><thead><tr><th>#</th><th>Título</th><th>Área</th><th>Tipo</th><th>Prioridade</th><th>Status</th><th>Data de criação</th><th>Ações</th></tr></thead><tbody>${html||`<tr><td colspan="8"><div class="empty">Você ainda não possui solicitações.</div></td></tr>`}</tbody></table></div></section>`}
 
 async function requestPage(){document.querySelectorAll('[data-nav]').forEach(x=>x.classList.toggle('active',x.dataset.nav==='newRequest'));await loadOptions();$('#workspace').innerHTML=`<div class="form-card"><p class="eyebrow">NOVA SOLICITAÇÃO</p><h1>Como podemos ajudar?</h1><p>Preencha os dados abaixo para registrar sua solicitação.</p><form class="form-grid" onsubmit="submitRequest(event)"><div class="field"><label>Título</label><input id="rqTitle" required placeholder="Ex.: Problema no portão principal"></div><div class="field"><label>Tipo</label><select id="rqType">${options.types.map(x=>`<option value="${x.id}">${x.name}</option>`).join('')}</select></div><div class="field"><label>Área</label><select id="rqArea">${options.areas.map(x=>`<option value="${x.id}">${x.name}</option>`).join('')}</select></div><div class="field"><label>Prioridade</label><select id="rqPriority"><option>Baixa</option><option selected>Média</option><option>Alta</option><option>Crítica</option></select></div><div class="field"><label>Data desejada</label><input id="rqDate" type="date"></div><div class="field full"><label>Descrição</label><textarea id="rqDesc" required placeholder="Descreva o que precisa ser feito..."></textarea></div><div class="field full"><button class="btn primary">Enviar solicitação</button></div></form></div>`}
 async function submitRequest(e){e.preventDefault();try{const d=await api('/api/requests',{method:'POST',body:JSON.stringify({title:$('#rqTitle').value.trim(),description:$('#rqDesc').value.trim(),type_id:$('#rqType').value,area_id:$('#rqArea').value,priority:$('#rqPriority').value,desired_date:$('#rqDate').value||null})});toast(`Solicitação ${d.request.protocol} registrada.`);userView('userHome')}catch(err){toast(err.message,true)}}

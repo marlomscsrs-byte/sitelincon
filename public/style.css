@@ -17,3 +17,27 @@
 /* Correção definitiva do contador do sino */
 .head-actions > .bell.notification-trigger, .head-actions > .bell {position:relative!important;display:grid!important;place-items:center!important;flex:0 0 39px!important;width:39px!important;height:39px!important;overflow:visible!important;}
 .head-actions > .bell .notification-badge {position:absolute!important;top:-4px!important;right:-4px!important;z-index:30!important;margin:0!important;transform:none!important;pointer-events:none!important;}
+
+.avatar-image{object-fit:cover;object-position:center;background:#111519;overflow:hidden}
+.login-pill .avatar-image{width:38px;height:38px}
+.profile .avatar-image{width:38px;height:38px}
+.page-head{max-width:1220px;margin:0 auto;padding:55px 32px 24px;display:flex;align-items:flex-end;justify-content:space-between;gap:20px}
+.page-head h1{margin:0;font-size:42px;letter-spacing:-1.5px}
+.page-head>div>p:not(.eyebrow){margin:8px 0 0;color:#8f97a2;font-size:13px}
+.profile-card{max-width:900px;margin:0 auto 30px;border:1px solid var(--line);background:linear-gradient(145deg,#101317,#0a0c0f);border-radius:14px;overflow:hidden}
+.profile-cover{padding:28px;display:flex;align-items:center;gap:18px;border-bottom:1px solid #20252b;background:linear-gradient(100deg,#15191e,#0b0d10)}
+.profile-cover h2{margin:0 0 5px;font-size:24px}
+.profile-cover p{margin:0;color:#7f8792;font-size:12px}
+.profile-avatar-wrap{width:86px;height:86px;border-radius:50%;flex:0 0 auto}
+.profile-avatar{width:86px;height:86px;border:2px solid #454c55;border-radius:50%;display:grid;place-items:center;font-size:28px;font-weight:900;background:#101419;color:#fff;object-fit:cover}
+.profile-form{padding:25px 28px}
+.profile-photo-actions{display:flex;align-items:center;gap:9px;flex-wrap:wrap;margin-bottom:22px}
+.profile-photo-actions small{width:100%;color:#777f89;font-size:10px}
+.profile-file-btn{position:relative;overflow:hidden;display:inline-flex}
+.profile-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.profile-full{grid-column:1/-1}
+.profile-form .field label{display:block;margin-bottom:7px;color:#aeb5be;font-size:11px;font-weight:800}
+.profile-form .field input,.profile-form .field textarea{width:100%;background:#07090b;border:1px solid #2b3138;border-radius:8px;color:#fff;padding:12px;outline:none;resize:vertical}
+.profile-form .field input:disabled{color:#8b939d;cursor:not-allowed}
+.profile-form .modal-actions{display:flex;justify-content:flex-end;margin-top:22px}
+@media(max-width:650px){.page-head{padding:30px 18px 18px;align-items:flex-start}.page-head h1{font-size:34px}.profile-card{margin:0 0 20px}.profile-cover{padding:20px}.profile-form{padding:20px}.profile-grid{grid-template-columns:1fr}.profile-full{grid-column:auto}}
