@@ -7,3 +7,9 @@
 .row-action{width:34px;height:34px;display:inline-grid;place-items:center;border:1px solid #2b3138;border-radius:8px;background:#101419;color:#dce2e8;cursor:pointer;transition:.18s}.row-action:hover{border-color:#ef102e;background:#1a0c10;color:#fff;transform:translateY(-1px)}.row-action svg{width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}.row-action:focus-visible{outline:2px solid #ef102e;outline-offset:2px}
 
 @media(max-width:560px){.notification-panel{width:calc(100vw - 24px);max-height:calc(100vh - 84px);right:12px;left:12px;top:70px}.notification-head{padding:12px}.notification-list{max-height:calc(100vh - 150px)}}
+
+/* Correção do contador do sino */
+.notification-trigger{position:relative!important;display:grid;place-items:center;flex:0 0 39px;width:39px!important;height:39px!important;overflow:visible!important;}
+.notification-trigger .notification-badge{position:absolute!important;right:-3px!important;top:-3px!important;z-index:20!important;transform:none!important;pointer-events:none;}
+.profile{overflow:visible!important;}
+@media(max-width:560px){.profile{right:10px!important;max-width:calc(100vw - 20px);}.profile .profile-name{max-width:90px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}.profile .bell{flex:0 0 39px;}}
