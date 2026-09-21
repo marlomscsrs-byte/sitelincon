@@ -38,6 +38,13 @@ function adminView(v){if(!currentUser?.is_admin)return toast('Acesso administrat
 function openAdminArea(){document.querySelector('.public-head')?.classList.add('hidden');$('#public').classList.add('hidden');$('#userArea').classList.remove('hidden');const admin=document.querySelector('[data-admin-nav]');if(admin)admin.classList.remove('hidden');requestsAdminPage()}
 function adminHead(title,sub){return `<div class="admin-top"><div><p class="eyebrow">PAINEL ADMINISTRATIVO</p><h1>${title}</h1><p>${sub}</p></div><button class="btn ghost" onclick="logout()">Sair</button></div>`}
 async function requestsAdminPage(){document.querySelectorAll('[data-nav]').forEach(x=>x.classList.toggle('active',x.dataset.nav==='adminRequests'));let rows=[];try{rows=(await api('/api/admin/requests')).requests}catch(err){toast(err.message,true)}const html=rows.map(r=>`<tr><td>${r.protocol}</td><td><strong>${r.title}</strong></td><td>${r.requester||'—'}</td><td>${r.type||'—'}</td><td>${r.area||'—'}</td><td>${priority(r.priority)}</td><td>${status(r.status)}</td><td>${fmtDay(r.desired_date)}</td><td><button class="row-action admin-view" type="button" title="Ver solicitação" aria-label="Ver solicitação ${r.protocol}" data-open-request="${r.id}" data-request-protocol="${r.protocol}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z"/><circle cx="12" cy="12" r="2.5"/></svg></button></td></tr>`).join('');$('#workspace').innerHTML=adminHead('Solicitações','Acompanhe e gerencie os pedidos recebidos.')+`<div class="admin-cards">${stat('Total',rows.length,'Todos os registros','red','▤')}${stat('Em análise',rows.filter(r=>r.status==='Em análise').length,'Aguardando atendimento','orange','◷')}${stat('Em andamento',rows.filter(r=>r.status==='Em andamento').length,'Em atendimento','blue','↗')}${stat('Concluídas',rows.filter(r=>r.status==='Concluída').length,'Finalizadas','green','✓')}</div><section class="section"><div class="section-head"><h2>Solicitações recentes</h2><button class="btn ghost" onclick="requestsAdminPage()">↻ Atualizar</button></div><div class="table-wrap"><table><thead><tr><th>Nº</th><th>Título</th><th>Solicitante</th><th>Tipo</th><th>Área</th><th>Prioridade</th><th>Status</th><th>Prazo</th><th>Ações</th></tr></thead><tbody>${html||`<tr><td colspan="9"><div class="empty">Nenhuma solicitação registrada.</div></td></tr>`}</tbody></table></div></section>`}
+document.addEventListener('submit',e=>{
+  const form=e.target.closest('[data-save-request]');
+  if(!form)return;
+  e.preventDefault();
+  saveRequestEdit(e,Number(form.dataset.saveRequest),form.dataset.saveProtocol||'');
+});
+
 document.addEventListener('click',e=>{
   const openBtn=e.target.closest('[data-open-request]');
   if(openBtn){e.preventDefault();e.stopPropagation();openRequestDetails(Number(openBtn.dataset.openRequest),openBtn.dataset.requestProtocol);return}
@@ -50,18 +57,33 @@ document.addEventListener('click',e=>{
 });
 
 async function openRequestDetails(id,protocol){try{const d=await api(`/api/admin/requests/${id}`),r=d.request,history=d.history||[];showModal(`<div class="request-detail-modal"><div class="modal-eyebrow">${r.protocol}</div><h2>${r.title}</h2><div class="detail-status">${status(r.status)} <span>Atualizada em ${fmtDate(r.updated_at)}</span></div><div class="detail-grid detail-grid-3"><div class="detail"><small>Solicitante</small><b>${r.requester||'—'}</b><span>${r.requester_email||''}</span></div><div class="detail"><small>Área</small><b>${r.area||'—'}</b></div><div class="detail"><small>Tipo</small><b>${r.type||'—'}</b></div><div class="detail"><small>Prioridade</small><b>${r.priority||'—'}</b></div><div class="detail"><small>Prazo</small><b>${fmtDay(r.desired_date)}</b></div><div class="detail"><small>Criada em</small><b>${fmtDate(r.created_at)}</b></div></div><div class="detail-block"><small>DESCRIÇÃO</small><p>${r.description||'Sem descrição.'}</p></div><div class="detail-block"><small>HISTÓRICO</small><div class="history">${history.length?history.map(h=>`<div class="history-item"><i></i><div><b>${h.action}</b><p>${h.details||''}</p><small>${fmtDate(h.created_at)}</small></div></div>`).join(''):'<p class="muted">Nenhum histórico registrado.</p>'}</div></div><div class="modal-actions"><button type="button" class="btn ghost" data-modal-close>Fechar</button><button type="button" class="btn primary" data-edit-request="${r.id}" data-edit-protocol="${String(r.protocol).replace(/\"/g,'&quot;')}">✎ Editar solicitação</button></div></div>`);}catch(err){toast(err.message,true)}}
-async function editRequest(id,protocol){try{const r=(await api(`/api/admin/requests/${id}`)).request;const renderForm=()=>showModal(`<div class="request-detail-modal"><div class="modal-eyebrow">EDITAR ${r.protocol}</div><h2>${r.title}</h2><form class="modal-form edit-form" onsubmit="saveRequestEdit(event,${r.id},${JSON.stringify(r.protocol)})"><label>Título<input id="editTitle" value=${JSON.stringify(r.title||'')} required></label><div class="form-grid"><label>Tipo<select id="editType">${options.types.map(x=>`<option value="${x.id}" ${String(x.name)===String(r.type)?'selected':''}>${x.name}</option>`).join('')}</select></label><label>Área<select id="editArea">${options.areas.map(x=>`<option value="${x.id}" ${String(x.name)===String(r.area)?'selected':''}>${x.name}</option>`).join('')}</select></label><label>Prioridade<select id="editPriority">${['Baixa','Média','Alta','Crítica'].map(x=>`<option ${x===r.priority?'selected':''}>${x}</option>`).join('')}</select></label><label>Status<select id="editStatus">${['Em análise','Em andamento','Concluída','Cancelada'].map(x=>`<option ${x===r.status?'selected':''}>${x}</option>`).join('')}</select></label><label>Prazo<input id="editDate" type="date" value="${r.desired_date?String(r.desired_date).slice(0,10):''}"></label></div><label>Descrição<textarea id="editDescription" required>${r.description||''}</textarea></label><label>Observação da alteração<input id="editNote" placeholder="Ex.: Ajustado após contato com o responsável."></label><div class="modal-actions"><button type="button" class="btn ghost" data-edit-cancel data-id="${r.id}" data-protocol="${String(r.protocol).replace(/\"/g,'&quot;')}">Cancelar</button><button type="submit" class="btn primary">Salvar alterações</button></div></form></div>`);renderForm();loadOptions().then(()=>{if(document.querySelector('#editType')){const t=document.querySelector('#editType'),a=document.querySelector('#editArea');t.innerHTML=options.types.map(x=>`<option value="${x.id}" ${String(x.name)===String(r.type)?'selected':''}>${x.name}</option>`).join('');a.innerHTML=options.areas.map(x=>`<option value="${x.id}" ${String(x.name)===String(r.area)?'selected':''}>${x.name}</option>`).join('')}}).catch(()=>{})}catch(err){toast(err.message,true)}}
+async function editRequest(id,protocol){try{await loadOptions();const r=(await api(`/api/admin/requests/${id}`)).request;showModal(`<div class="request-detail-modal"><div class="modal-eyebrow">EDITAR ${r.protocol}</div><h2>${r.title}</h2><form class="modal-form edit-form" data-save-request="${r.id}" data-save-protocol="${String(r.protocol).replace(/\"/g,'&quot;')}"><label>Título<input id="editTitle" value=${JSON.stringify(r.title||'')} required></label><div class="form-grid"><label>Tipo<select id="editType">${options.types.map(x=>`<option value="${x.id}" ${String(x.name)===String(r.type)?'selected':''}>${x.name}</option>`).join('')}</select></label><label>Área<select id="editArea">${options.areas.map(x=>`<option value="${x.id}" ${String(x.name)===String(r.area)?'selected':''}>${x.name}</option>`).join('')}</select></label><label>Prioridade<select id="editPriority">${['Baixa','Média','Alta','Crítica'].map(x=>`<option ${x===r.priority?'selected':''}>${x}</option>`).join('')}</select></label><label>Status<select id="editStatus">${['Em análise','Em andamento','Concluída','Cancelada'].map(x=>`<option ${x===r.status?'selected':''}>${x}</option>`).join('')}</select></label><label>Prazo<input id="editDate" type="date" value="${r.desired_date?String(r.desired_date).slice(0,10):''}"></label></div><label>Descrição<textarea id="editDescription" required>${r.description||''}</textarea></label><label>Observação da alteração<input id="editNote" placeholder="Ex.: Ajustado após contato com o responsável."></label><div class="modal-actions"><button type="button" class="btn ghost" data-edit-cancel data-id="${r.id}" data-protocol="${String(r.protocol).replace(/\"/g,'&quot;')}">Cancelar</button><button type="submit" class="btn primary">Salvar alterações</button></div></form></div>`)}catch(err){toast(err.message,true)}}
 async function saveRequestEdit(e,id,protocol){
   e.preventDefault();
-  const btn=e.submitter||e.target.querySelector('button[type=submit]');
+  e.stopPropagation();
+  const form=e.currentTarget||e.target;
+  const btn=form.querySelector('button[type="submit"]');
+  const value=id=>document.getElementById(id)?.value ?? '';
   if(btn){btn.disabled=true;btn.textContent='Salvando...'}
   try{
-    const payload={title:$('#editTitle').value.trim(),type_id:$('#editType').value||null,area_id:$('#editArea').value||null,priority:$('#editPriority').value,status:$('#editStatus').value,desired_date:$('#editDate').value||null,description:$('#editDescription').value.trim(),note:$('#editNote').value.trim()};
-    const result=await api(`/api/admin/requests/${id}`,{method:'PATCH',body:JSON.stringify(payload)});
-    toast(result.message||'Solicitação atualizada com sucesso.');
+    const payload={
+      title:value('editTitle').trim(),
+      type_id:value('editType')||null,
+      area_id:value('editArea')||null,
+      priority:value('editPriority'),
+      status:value('editStatus'),
+      desired_date:value('editDate')||null,
+      description:value('editDescription').trim(),
+      note:value('editNote').trim()
+    };
+    if(!payload.title||!payload.description)throw new Error('Título e descrição são obrigatórios.');
+    const result=await api(`/api/admin/requests/${encodeURIComponent(id)}`,{method:'PATCH',body:JSON.stringify(payload)});
+    if(!result?.request)throw new Error('O servidor não confirmou a alteração.');
+    toast('Solicitação atualizada com sucesso.');
     await requestsAdminPage();
-    await openRequestDetails(id,protocol);
+    await openRequestDetails(Number(id),protocol);
   }catch(err){
+    console.error('Salvar solicitação:',err);
     toast(err.message||'Não foi possível salvar as alterações.',true);
     if(btn){btn.disabled=false;btn.textContent='Salvar alterações'}
   }
